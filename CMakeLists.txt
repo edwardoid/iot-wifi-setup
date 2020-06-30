@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(iotwifi VERSION 1.0 DESCRIPTION "A library to establish WiFI conenction using NetworkManager")
+project(iotwifi VERSION 1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 11)
 
 
