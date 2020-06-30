@@ -1,0 +1,6 @@
+[submodule "tpl"]
+	path = tpl
+	url = https://gitlab.com/eidheim/tiny-process-library.git
+[submodule "3dp/s2s"]
+	path = 3dp/s2s
+	url = https://github.com/edwardoid/s2s.git
