@@ -7,6 +7,7 @@ using namespace IoT;
 
 void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, bool autoSwitchInAPMode)
 {
+    stateChanged(State::Uninitialized);
     m_apSSID = apSSID;
     m_apPassword = apPassword;
 
@@ -45,14 +46,14 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
 
     NetworkManager::i().update();
 
-
-    stateChanged(State::CheckingConnectivity);
+    if (state() != State::Connected)
+        stateChanged(State::CheckingConnectivity);
     findAPConnection();
 }
 
-void WiFi::updateInternetConnectivity(bool conencted)
+void WiFi::updateInternetConnectivity(bool connected)
 {
-    NetworkManager::i().InternetConnectionAvailable.set(conencted);
+    NetworkManager::i().InternetConnectionAvailable.set(connected);
 }
 
 void WiFi::switchToAPMode()
