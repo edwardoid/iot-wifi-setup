@@ -22,11 +22,11 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
         m_iface = allDevs[0];
         LOG_DEBUG << "Selected " << m_iface << " as wifi device!";
     }
-    NetworkManager::i().InternetConnectionAvailable.connect([this](const bool& ok) {
+    NetworkManager::i().InternetConnectionAvailable.connect([this, autoSwitchInAPMode](const bool& ok) {
         if (state() == State::TryingToConnect || state() == State::Connected || state() == State::CheckingConnectivity) {
             if (ok && NetworkManager::i().activeConnection(m_iface).uuid != m_apConnectionID) {
                 stateChanged(State::Connected);
-            } else {
+            } else if(autoSwitchInAPMode) {
                 switchToAPMode();
             }
         }
@@ -38,6 +38,8 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
         }
         if (connection.mode == Mode::AccessPoint) {
             stateChanged(State::InAPMode);
+        } else if(connection.mode == Mode::Infrastructure && connection.signal > 0) {
+            stateChanged(State::Connected);
         }
         m_currentSSID = connection.ssid;
         m_currentIP = connection.ip;
@@ -48,7 +50,7 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
 
     if (state() != State::Connected)
         stateChanged(State::CheckingConnectivity);
-    findAPConnection();
+    findAPConnection(autoSwitchInAPMode);
 }
 
 void WiFi::updateInternetConnectivity(bool connected)
@@ -74,7 +76,7 @@ void WiFi::switchToAPMode()
     stateChanged(State::InAPMode);
 }
 
-void WiFi::findAPConnection()
+void WiFi::findAPConnection(bool autoSwitchInAPMode)
 {
     for(const IoT::Connection& c : NetworkManager::i().connections()) {
         if (c.mode != IoT::Mode::AccessPoint || c.name != m_apSSID) {
@@ -108,7 +110,7 @@ void WiFi::findAPConnection()
     }
 
     LOG_DEBUG << "AP mode connection: " << m_apConnectionID;
-    if (!NetworkManager::i().InternetConnectionAvailable.value) {
+    if (!NetworkManager::i().InternetConnectionAvailable.value && autoSwitchInAPMode) {
         switchToAPMode();
     }
 }
@@ -144,6 +146,7 @@ std::vector<WifiNetwork> WiFi::availableNetworks(bool scan)
 
 void WiFi::tryConnect(std::string ssid, std::string password)
 {
+    auto lastConnection = NetworkManager::i().activeConnection(m_iface).uuid;
     stateChanged(State::TryingToConnect);
     WifiNetwork net;
     net.ssid = ssid;
@@ -152,7 +155,7 @@ void WiFi::tryConnect(std::string ssid, std::string password)
     if(Result::Connected != NetworkManager::i().connectoToNetwork(m_iface, net))
     {
         stateChanged(State::Disconnected);
-        switchToAPMode();
+        NetworkManager::i().activateConnection(lastConnection);
     }
     else
     {

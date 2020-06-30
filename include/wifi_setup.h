@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <functional>
 #include "wifinetwork.h"
 
 namespace IoT
@@ -48,7 +49,7 @@ namespace IoT
         int wifiSignal() const;
     private:
         void stateChanged(State newState);
-        void findAPConnection();
+        void findAPConnection(bool autoSwitchInAPMode);
     private:
         std::function<void(State)> m_onStateChanged;
         std::string m_iface;
