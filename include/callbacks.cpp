@@ -6,102 +6,26 @@
 
 using namespace IoT;
 
-gboolean SignalHandler::checkConnectivity(gpointer user_data)
-{
-    LOG_DEBUG << "Checking connectivity...";
-    Data* data = (Data*)(user_data);
-
-    NMConnectivityState state = nm_client_check_connectivity(data->Client, NULL, NULL);
-    LOG_DEBUG << "Connectivity updated...";
-    switch(state)
-    {
-        case NM_CONNECTIVITY_FULL: {
-            data->Connectivity = NetworkState::Connected;
-            break;
-        }
-        case NM_CONNECTIVITY_LIMITED: {
-            data->Connectivity = NetworkState::Limited;
-            break;
-        }
-        case NM_CONNECTIVITY_NONE: {
-            data->Connectivity = NetworkState::Disconnected;
-            break;
-        }
-        default: {
-            LOG_INFO << "Unknown connectivity state (yet)";
-            data->Connectivity = NetworkState::UnknownYet;
-            break;
-        }
-    }
-
-    return TRUE;
-}
-
-void SignalHandler::onConnectionAddedReceived(NMClient*client, NMRemoteConnection *connection, gpointer user_data)
-{
-    Data* data = (Data*)(user_data);
-    if (data == NULL) {
-        LOG_ERROR << "Internal error in glib slot";
-    }
-
-    bool ok = true;
-    Connection c = Utility::connectionFromNM(NM_CONNECTION(connection), ok);
-    if (!ok) {
-        return;
-    }
-
-    data->ConnectionAdded.emit(c);
-}
-
-void SignalHandler::onDeviceStateChanged(NMDevice *device, guint new_state, guint old_state, guint reason, gpointer user_data)
-{
-    Data* data = (Data*)(user_data);
-    if (data == NULL) {
-        LOG_ERROR << "Internal error in glib slot";
-    }
-
-    if (!NM_IS_DEVICE_WIFI(device)) {
-        return;
-    }
-
-    bool ok = false;
-    WifiNetwork net = Utility::getCurrentNetwork(NM_DEVICE_WIFI(device), ok);
-    if (ok) {
-        data->DeviceWiFiNetworkChanged.emit(std::string(nm_device_get_iface(device)), net);
-    }
-
-    NMDeviceState state = (NMDeviceState)new_state;
-
-    NMActiveConnection* connection = nm_device_get_active_connection(device);
-
-    Connection c;
-    if (connection) {
-        NMRemoteConnection* remote = nm_active_connection_get_connection(connection);
-        c = Utility::connectionFromNM(NM_CONNECTION(remote), ok);
-    }
-
-    ConnectionStatus was = Utility::deviceStateToConnectionStatus((NMDeviceState) old_state);
-    ConnectionStatus now = Utility::deviceStateToConnectionStatus((NMDeviceState) new_state);
-
-    if (was != now && ok)
-        data->ConnectionChanged.emit(c, now);
-}
-
 void Callbacks::scanCompleted(GObject *device, GAsyncResult *result, gpointer user_data)
 {
     NMDeviceWifi *wifi = NM_DEVICE_WIFI (device);
-    WifiScanData *data = (WifiScanData*)user_data;
+    WifiScanData* data = (WifiScanData*)user_data;
     GError *error = NULL;
+    std::unique_lock<std::mutex> lock(data->mx);
 
     if (!nm_device_wifi_request_scan_finish (wifi, result, &error)) {
-        data->lock.unlock();
         if (error != NULL) {
+            if (data->force) {
+                std::string cmd = "iwlist ";
+                cmd += nm_device_get_iface(NM_DEVICE(wifi));
+                cmd += " scan";
+                system(cmd.c_str());
+            }
             LOG_ERROR << "Error on finishing scan: " << error->message;
             g_error_free(error);
-            return;
         }
     }
-    data->lock.unlock();
+    data->cv.notify_all();
 }
 
 void Callbacks::connectionActivated(GObject *client, GAsyncResult *result, gpointer user_data) {
@@ -112,13 +36,15 @@ void Callbacks::connectionActivated(GObject *client, GAsyncResult *result, gpoin
 
     if (error) {
         LOG_ERROR << "Error activating connection: " << error->message;
+        data->data->LastConnectResult.set(Result::BadCredentials);
         g_error_free(error);
     } else {
         NMRemoteConnection* remote = nm_active_connection_get_connection(active);
         LOG_DEBUG << "Activated: " << nm_connection_get_path(NM_CONNECTION(remote));
         bool ok = true;
-        data->data->ConnectionActivated.emit(Utility::connectionFromNM(NM_CONNECTION(remote), ok));
+        data->data->LastConnectResult.set(Result::Connected);
     }
+    g_main_loop_quit (data->data->Loop);
     delete data;
 }
 
@@ -132,19 +58,16 @@ void Callbacks::addedNewConnection(GObject *client, GAsyncResult *result, gpoint
     if (error) {
         LOG_ERROR << "Error adding connection:" << error->message;
         g_error_free(error);
+        data->data->LastConnectResult.set(Result::BadParameters);
+        g_error_free(error);
+        delete data;
+        g_main_loop_quit (data->data->Loop);
+        return;
     } else {
         LOG_DEBUG << "Added: " << nm_connection_get_path(NM_CONNECTION(remote));
     }
 
-    if (error) {
-        g_error_free(error);
-        delete data;
-        return;
-    }
-
-    bool ok;
-    data->data->ConnectionAdded.emit(Utility::connectionFromNM(NM_CONNECTION(remote), ok));
-
+    data->data->LastConnectResult.set(Result::Added);
     if (data->Activate) {
         LOG_DEBUG << "Activating...";
         nm_client_activate_connection_async(NM_CLIENT(client), NM_CONNECTION(remote), 
@@ -153,6 +76,7 @@ void Callbacks::addedNewConnection(GObject *client, GAsyncResult *result, gpoint
                                             Callbacks::connectionActivated,
                                             data);
     } else {
+        g_main_loop_quit (data->data->Loop);
         delete data;
     }
 }

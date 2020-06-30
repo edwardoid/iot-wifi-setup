@@ -1,42 +1,13 @@
 #ifndef IOT_SIGNALS_H
 #define IOT_SIGNALS_H
 
+#include "wifinetwork.h"
 #include <s2s.h>
 #include <s2s_property.h>
 #include <string>
 
 namespace IoT
 {
-    enum class Authentication
-    {
-        None,
-        WEP,
-        WPA,
-        WPA2,
-        Enterprise
-    };
-
-    struct WifiNetwork
-    {
-        std::string ssid;
-        std::string password;
-        Authentication auth;
-        bool encrypted;
-        int signal;
-        const bool operator == (const WifiNetwork& wifi)
-        {
-            return ssid == wifi.ssid && auth == wifi.auth && encrypted == wifi.encrypted;
-        }
-    };
-
-    enum class NetworkState
-    {
-        UnknownYet = 0,
-        Disconnected,
-        Limited,
-        Connected
-    };
-
     enum class Mode {
         AdHoc,
         AccessPoint,
@@ -55,16 +26,47 @@ namespace IoT
         Mode mode;
         std::string uuid;
         std::string name;
+        std::string ip;
+    };
+
+    enum class Result
+    {
+        Unknown = 0,
+        Initilizaling,
+        InternalError,
+        InterfaceNotFound,
+        BadParameters,
+        NetworkNotFound,
+        BadCredentials,
+        Added,
+        Connected,
+        Disconnected
+    };
+
+    struct ActiveConnection: public Connection, public WifiNetwork
+    {
+        bool operator == (const ActiveConnection& src) const
+        {
+            return ssid == src.ssid &&
+                   auth == src.auth &&
+                   encrypted == src.encrypted &&
+                   signal == src.signal &&
+                   mode == src.mode &&
+                   uuid == src.uuid &&
+                   name == src.name &&
+                   ip == src.ip;
+        }
+
+        bool operator != (const ActiveConnection& src) const
+        {
+            return !(*this == src);
+        }
     };
 
     struct NetworkSignals
     {
-        SignalSlot::Signal<Connection> ConnectionAdded;
-        SignalSlot::Signal<Connection> ConnectionActivated;
-        SignalSlot::Signal<bool> InternetConenctionAvailable;
-        SignalSlot::Signal<std::string, WifiNetwork> DeviceWiFiNetworkChanged;
-        SignalSlot::Signal<Connection, ConnectionStatus> ConnectionChanged;
-        SignalSlot::Property<NetworkState> Connectivity;
+        SignalSlot::Property<bool> InternetConnectionAvailable;
+        SignalSlot::Property<Result> LastConnectResult;
     };
 }
 

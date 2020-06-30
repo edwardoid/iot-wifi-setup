@@ -1,7 +1,7 @@
 #include "wifi_setup.h"
 #include "log.h"
 #include "networkmanager.h"
-#include <iostream>
+#include <algorithm>
 
 using namespace IoT;
 
@@ -9,84 +9,6 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
 {
     m_apSSID = apSSID;
     m_apPassword = apPassword;
-    m_autoSwitchInAPMode = autoSwitchInAPMode;
-
-    NetworkManager::i().ConnectionAdded.connect([this](Connection c) {
-        if (c.mode == Mode::AccessPoint) {
-            m_apConnectionID = c.uuid;
-        }
-    });
-
-    NetworkManager::i().ConnectionActivated.connect([this](Connection c) {
-        if (c.uuid == m_apConnectionID) {
-            stateChanged(State::InAPMode);
-        }
-    });
-
-    NetworkManager::i().Connectivity.connect([this](const NetworkState& state) {
-        switch(state) {
-            case NetworkState::Disconnected: {
-                LOG_WARN << "Connection lost. Waiting for updates from device(if not received yet)";
-                stateChanged(State::Disconnected);
-                switchToAPMode();
-                break;
-            }
-            case NetworkState::Limited: {
-                LOG_WARN << "Connection is limited";
-                break;
-            }
-            case NetworkState::Connected: {
-                if (m_currentSSID != m_apSSID) {
-                    stateChanged(State::Connected);
-                }
-                break;
-            }
-            case NetworkState::UnknownYet:
-            default:  {
-
-            }
-        }
-    });
-
-    NetworkManager::i().ConnectionChanged.connect([this](Connection c, ConnectionStatus connected) {
-        if (m_apConnectionID == c.uuid) {
-            switch(connected) {
-                case ConnectionStatus::Connecting: {
-                    stateChanged(State::SwitchingToAP);
-                    break;
-                }
-                case ConnectionStatus::Connected: {
-                    stateChanged(State::InAPMode);
-                    break;
-                }
-                case ConnectionStatus::Disconnected:
-                default: {}
-            }
-        } else {
-            switch(connected) {
-                case ConnectionStatus::Connecting: {
-                    stateChanged(State::TryingToConnect);
-                    break;
-                }
-                case ConnectionStatus::Connected: {
-                    stateChanged(State::CheckingConnectivity);
-                    break;
-                }
-                case ConnectionStatus::Disconnected: {
-                    stateChanged(State::Disconnected);
-                    switchToAPMode();
-                    break;
-                }
-                default: {}
-            }
-        }
-    });
-
-    NetworkManager::i().DeviceWiFiNetworkChanged.connect([this](std::string iface, WifiNetwork network) {
-        if (iface == m_iface) {
-            m_currentSSID = network.ssid;
-        }
-    });
 
     m_iface = iface;
     if (m_iface.empty()) {
@@ -101,36 +23,60 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
     }
     stateChanged(State::CheckingConnectivity);
     findAPConnection();
+    NetworkManager::i().InternetConnectionAvailable.connect([this](const bool& ok) {
+        if (state() == State::TryingToConnect || state() == State::Connected || state() == State::CheckingConnectivity) {
+            if (ok) {
+                stateChanged(State::Connected);
+            } else {
+                switchToAPMode();
+            }
+        }
+    });
+
+    NetworkManager::i().ActiveConnectionChanged.connect([this](std::string iface, ActiveConnection connection){
+        if (iface != m_iface) {
+            return;
+        }
+        m_currentSSID = connection.ssid;
+        m_currentIP = connection.ip;
+        m_signal = connection.signal;
+    });
 
     NetworkManager::i().update();
+}
+
+void WiFi::updateInternetConnectivity(bool conencted)
+{
+    NetworkManager::i().InternetConnectionAvailable.set(conencted);
 }
 
 void WiFi::switchToAPMode()
 {
     if (m_apConnectionID.empty()) {
         LOG_ERROR << "No AP mode specified, can't switch to AP";
+        stateChanged(IoT::WiFi::Uninitialized);
         return;
     }
 
-    if(!NetworkManager::i().activateConnection(m_apConnectionID)) {
-        LOG_ERROR << "Can't activate connection " << m_apConnectionID;
-    }
     stateChanged(State::SwitchingToAP);
+
+    if(!NetworkManager::i().activateConnection(m_apConnectionID) || NetworkManager::i().LastConnectResult.value != Result::Connected) {
+        LOG_ERROR << "Can't activate connection " << m_apConnectionID;
+        stateChanged(IoT::WiFi::Uninitialized);
+        return;
+    }
+    stateChanged(State::InAPMode);
 }
 
 void WiFi::findAPConnection()
 {
-    for(const IoT::Connection& c : NetworkManager::i().connections())
-    {
-        if (c.mode != IoT::Mode::AccessPoint) {
-            continue;
-        }
-
-        if (c.name != m_apSSID) {
+    for(const IoT::Connection& c : NetworkManager::i().connections()) {
+        if (c.mode != IoT::Mode::AccessPoint || c.name != m_apSSID) {
             continue;
         }
 
         m_apConnectionID = c.uuid;
+        break;
     }
 
     if (m_apConnectionID.empty()) {
@@ -139,14 +85,26 @@ void WiFi::findAPConnection()
         net.ssid = m_apSSID;
         net.password = m_apPassword;
         net.auth = IoT::Authentication::WPA2;
-        if(!NetworkManager::i().createHotspot(m_iface, net)) {
+        if(NetworkManager::i().createHotspot(m_iface, net) != Result::Added) {
             LOG_ERROR << "Can't create access point connection";
             stateChanged(State::Uninitialized);
             return;
         }
     }
 
+    for(const IoT::Connection& c : NetworkManager::i().connections()) {
+        if (c.mode != IoT::Mode::AccessPoint || c.name != m_apSSID) {
+            continue;
+        }
+
+        m_apConnectionID = c.uuid;
+        break;
+    }
+
     LOG_DEBUG << "AP mode connection: " << m_apConnectionID;
+    if (!NetworkManager::i().InternetConnectionAvailable.value) {
+        switchToAPMode();
+    }
 }
 
 void WiFi::onStateChanged(std::function<void(WiFi::State)> cb) {
@@ -171,33 +129,39 @@ void WiFi::stateChanged(State newState)
     m_onStateChanged(m_state);
 }
 
-std::vector<std::string> WiFi::availableNetworks()
+std::vector<WifiNetwork> WiFi::availableNetworks(bool scan)
 {
-    
+    std::vector<WifiNetwork> networks = NetworkManager::i().scan(m_iface, scan);
+    std::sort(networks.begin(), networks.end(), [](const WifiNetwork& l, const WifiNetwork& r) { return l.signal > r.signal; });
+    return networks;
 }
 
 void WiFi::tryConnect(std::string ssid, std::string password)
 {
+    stateChanged(State::TryingToConnect);
     WifiNetwork net;
     net.ssid = ssid;
     net.password = password;
     net.auth = Authentication::WPA2;
-    NetworkManager::i().connectoToNetwork(m_iface, net);
-    stateChanged(State::TryingToConnect);
+    if(Result::Connected != NetworkManager::i().connectoToNetwork(m_iface, net))
+    {
+        stateChanged(State::Disconnected);
+        switchToAPMode();
+    }
 }
 
-void WiFi::start()
-{
-
-}
-
-std::string WiFi::currentSSID()
+std::string WiFi::currentSSID() const
 {
     return m_currentSSID;
 }
 
-std::string WiFi::currentIP()
+int WiFi::wifiSignal() const
+{
+    return m_signal;
+}
+
+
+std::string WiFi::currentIP() const
 {
     return m_currentIP;
 }
-

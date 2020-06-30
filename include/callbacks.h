@@ -3,15 +3,20 @@
 
 #include <NetworkManager.h>
 #include <mutex>
+#include <condition_variable>
 
 namespace IoT {
+
+    struct CheckStateData
+    {
+        struct Data* data;
+        GMainLoop* Loop;
+    };
     struct SignalHandler
     {
         static gboolean checkConnectivity(gpointer user_data);
 
         static void onConnectionAddedReceived(NMClient*client, NMRemoteConnection *connection, gpointer user_data);
-
-        static void onDeviceStateChanged(NMDevice *device, guint new_state, guint old_state, guint reason, gpointer user_data);
     };
 
     struct AddConnectionData
@@ -22,8 +27,9 @@ namespace IoT {
 
     struct WifiScanData
     {
-        struct Data* data;
-        std::mutex lock;
+        std::mutex mx;
+        std::condition_variable cv;
+        bool force = false;
     };
 
     struct Callbacks

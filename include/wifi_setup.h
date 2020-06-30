@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include "wifinetwork.h"
 
 namespace IoT
 {
@@ -31,16 +32,19 @@ namespace IoT
 
         void start();
 
-        std::vector<std::string> availableNetworks();
+        std::vector<IoT::WifiNetwork> availableNetworks(bool scan = true);
 
         void tryConnect(std::string ssid,
                         std::string password);
 
         void onStateChanged(std::function<void(State)> state);
 
+        void updateInternetConnectivity(bool conencted);
+
         State state() const;
-        std::string currentSSID();
-        std::string currentIP();
+        std::string currentSSID() const;
+        std::string currentIP() const;
+        int wifiSignal() const;
     private:
         void stateChanged(State newState);
         void findAPConnection();
@@ -50,11 +54,10 @@ namespace IoT
         std::string m_apSSID;
         std::string m_apPassword;
         std::string m_apConnectionID;
-        std::string m_internetConnectionID;
 
         std::string m_currentSSID;
         std::string m_currentIP;
-        bool m_autoSwitchInAPMode;
+        int m_signal;
         State m_state;
     };
 }
