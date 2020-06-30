@@ -37,8 +37,9 @@ namespace IoT
         void tryConnect(std::string ssid,
                         std::string password);
 
-        void onStateChanged(std::function<void(State)> state);
+        bool connectToNetwork(std::string uuid);
 
+        void onStateChanged(std::function<void(State)> state);
         void updateInternetConnectivity(bool conencted);
 
         State state() const;

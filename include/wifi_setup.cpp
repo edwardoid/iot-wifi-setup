@@ -21,8 +21,6 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
         m_iface = allDevs[0];
         LOG_DEBUG << "Selected " << m_iface << " as wifi device!";
     }
-    stateChanged(State::CheckingConnectivity);
-    findAPConnection();
     NetworkManager::i().InternetConnectionAvailable.connect([this](const bool& ok) {
         if (state() == State::TryingToConnect || state() == State::Connected || state() == State::CheckingConnectivity) {
             if (ok && NetworkManager::i().activeConnection(m_iface).uuid != m_apConnectionID) {
@@ -46,6 +44,10 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
     });
 
     NetworkManager::i().update();
+
+
+    stateChanged(State::CheckingConnectivity);
+    findAPConnection();
 }
 
 void WiFi::updateInternetConnectivity(bool conencted)
@@ -155,6 +157,11 @@ void WiFi::tryConnect(std::string ssid, std::string password)
     {
         stateChanged(State::Connected);
     }
+}
+
+bool WiFi::connectToNetwork(std::string uuid)
+{
+    return NetworkManager::i().activateConnection(uuid);
 }
 
 std::string WiFi::currentSSID() const

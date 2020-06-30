@@ -36,7 +36,6 @@ NetworkManager::NetworkManager()
         const GPtrArray *devicesArr = nm_client_get_devices(m_data->Client);
         while(1) {
             while (g_main_context_iteration(NULL, FALSE) == TRUE) {
-                LOG_DEBUG << "Processing pending operations...";
             }
             for (int i = 0; i < devicesArr->len; i++)
             {
@@ -48,7 +47,6 @@ NetworkManager::NetworkManager()
 
                 std::string iface = nm_device_get_iface(device);
                 auto state = nm_device_get_state(device);
-                LOG_DEBUG << iface << " in state " << nm_utils_enum_to_str(NM_TYPE_DEVICE_STATE, state);
                 ConnectionStatus now = Utility::deviceStateToConnectionStatus(state);
 
                 switch (now)
