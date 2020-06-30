@@ -37,6 +37,9 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
         if (iface != m_iface) {
             return;
         }
+        if (connection.mode == Mode::AccessPoint) {
+            stateChanged(State::InAPMode);
+        }
         m_currentSSID = connection.ssid;
         m_currentIP = connection.ip;
         m_signal = connection.signal;
@@ -147,6 +150,10 @@ void WiFi::tryConnect(std::string ssid, std::string password)
     {
         stateChanged(State::Disconnected);
         switchToAPMode();
+    }
+    else
+    {
+        stateChanged(State::Connected);
     }
 }
 
