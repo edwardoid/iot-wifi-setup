@@ -109,6 +109,7 @@ void WiFi::switchToAPMode()
 {
     if (m_apConnectionID.empty()) {
         LOG_ERROR << "No AP mode specified, can't switch to AP";
+        return;
     }
 
     if(!NetworkManager::i().activateConnection(m_apConnectionID)) {
@@ -182,6 +183,7 @@ void WiFi::tryConnect(std::string ssid, std::string password)
     net.password = password;
     net.auth = Authentication::WPA2;
     NetworkManager::i().connectoToNetwork(m_iface, net);
+    stateChanged(State::TryingToConnect);
 }
 
 void WiFi::start()

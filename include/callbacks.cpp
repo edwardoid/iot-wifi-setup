@@ -8,10 +8,11 @@ using namespace IoT;
 
 gboolean SignalHandler::checkConnectivity(gpointer user_data)
 {
-    LOG_DEBUG << "Checking conenctivity...";
+    LOG_DEBUG << "Checking connectivity...";
     Data* data = (Data*)(user_data);
 
     NMConnectivityState state = nm_client_check_connectivity(data->Client, NULL, NULL);
+    LOG_DEBUG << "Connectivity updated...";
     switch(state)
     {
         case NM_CONNECTIVITY_FULL: {
@@ -27,6 +28,7 @@ gboolean SignalHandler::checkConnectivity(gpointer user_data)
             break;
         }
         default: {
+            LOG_INFO << "Unknown connectivity state (yet)";
             data->Connectivity = NetworkState::UnknownYet;
             break;
         }
@@ -85,13 +87,27 @@ void SignalHandler::onDeviceStateChanged(NMDevice *device, guint new_state, guin
         data->ConnectionChanged.emit(c, now);
 }
 
+void Callbacks::scanCompleted(GObject *device, GAsyncResult *result, gpointer user_data)
+{
+    NMDeviceWifi *wifi = NM_DEVICE_WIFI (device);
+    WifiScanData *data = (WifiScanData*)user_data;
+    GError *error = NULL;
+
+    if (!nm_device_wifi_request_scan_finish (wifi, result, &error)) {
+        data->lock.unlock();
+        if (error != NULL) {
+            LOG_ERROR << "Error on finishing scan: " << error->message;
+            g_error_free(error);
+            return;
+        }
+    }
+    data->lock.unlock();
+}
+
 void Callbacks::connectionActivated(GObject *client, GAsyncResult *result, gpointer user_data) {
     AddConnectionData *data = (AddConnectionData *)user_data;
     GError *error = NULL;
 
-    /* NM responded to our request; either handle the resulting error or
-	 * print out the object path of the connection we just added.
-	 */
     NMActiveConnection* active = nm_client_activate_connection_finish(NM_CLIENT(client), result, &error);
 
     if (error) {

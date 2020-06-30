@@ -24,9 +24,11 @@ NetworkManager::NetworkManager()
     }
 
     const GPtrArray *devicesArr = nm_client_get_devices(m_data->Client);
+
     for (int i = 0; i < devicesArr->len; i++) {
         NMDevice *device = NM_DEVICE(g_ptr_array_index(devicesArr, i));
         if (NM_IS_DEVICE_WIFI(device)) {
+            LOG_DEBUG << "Subscrbing for updates for: " << nm_device_get_iface(device);
             g_signal_connect(device, "state-changed", G_CALLBACK(SignalHandler::onDeviceStateChanged), m_data);
         }
     }
@@ -169,18 +171,13 @@ std::vector<WifiNetwork> NetworkManager::scan(std::string interface)
         return nets;
     }
 
-    GError *err = NULL;
-    if (!nm_device_wifi_request_scan(NM_DEVICE_WIFI(dev), NULL, &err) && err->code != 6) {
-        LOG_ERROR << "Can't perform scan Error:" << err->code << " " << err->message;
-        g_error_free(err);
-        return nets;
-    }
+    WifiScanData* data = new WifiScanData();
+    data->data = m_data;
+    data->lock.lock();
+    nm_device_wifi_request_scan_async(NM_DEVICE_WIFI(dev), NULL, Callbacks::scanCompleted, data);
 
-    if (err == NULL) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
-    } else {
-        g_error_free(err);
-    }
+    delete data;
+
     const GPtrArray *aps = nm_device_wifi_get_access_points(NM_DEVICE_WIFI(dev));
 
     for (int i = 0; i < aps->len; i++)
@@ -264,6 +261,7 @@ bool NetworkManager::connectoToNetwork(std::string iface, WifiNetwork network)
             LOG_DEBUG << "Current connection is HotSpot and scanning is not available. Deactivateing to scan";
             if(!nm_client_deactivate_connection(m_data->Client, activeConnection, NULL, &error) || error != NULL) {
                 LOG_DEBUG << "Can't deactivate active conenction. Error:" << error->message;
+                g_error_free(error);
                 return false;
             }
 
@@ -271,7 +269,6 @@ bool NetworkManager::connectoToNetwork(std::string iface, WifiNetwork network)
             nm_client_wireless_set_enabled(m_data->Client, TRUE);
         }
     }
-
 
     NMAccessPoint* ap = NULL;
     while (count < 45 && ap == NULL) {
@@ -453,7 +450,6 @@ bool NetworkManager::createHotspot(std::string iface, WifiNetwork network)
         options->data = m_data;
         options->Activate = false;
         nm_client_add_connection_async(m_data->Client, connection, true, NULL, Callbacks::addedNewConnection, options);
-	    g_main_loop_run (m_data->Loop);
     }
 
     g_object_unref (connection);
@@ -466,5 +462,3 @@ NetworkManager &NetworkManager::i()
     static NetworkManager instance;
     return instance;
 }
-
-//  g++ -std=c++11 networkmanager.cpp $(pkg-config --libs --cflags libnm)
