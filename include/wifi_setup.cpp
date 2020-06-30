@@ -25,7 +25,7 @@ void WiFi::init(std::string iface, std::string apSSID, std::string apPassword, b
     findAPConnection();
     NetworkManager::i().InternetConnectionAvailable.connect([this](const bool& ok) {
         if (state() == State::TryingToConnect || state() == State::Connected || state() == State::CheckingConnectivity) {
-            if (ok) {
+            if (ok && NetworkManager::i().activeConnection(m_iface).uuid != m_apConnectionID) {
                 stateChanged(State::Connected);
             } else {
                 switchToAPMode();
