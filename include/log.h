@@ -1,5 +1,5 @@
-#ifndef LOG_H
-#define LOG_H
+#ifndef IWS_LOG_H
+#define IWS_LOG_H
 
 #include <iostream>
 #define F_NAME __PRETTY_FUNCTION__
@@ -26,4 +26,4 @@
 #define LOG_WARNING LOG_WARN
 #endif
 
-#endif // LOG_H
+#endif // IWS_LOG_H
