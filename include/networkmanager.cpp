@@ -2,73 +2,13 @@
 #include <glib.h>
 #include "nm_private_data.h"
 #include "log.h"
-#include "nm_utils.h"
-#include "nm_signal_handlers.h"
+#include "utilities.h"
+#include "callbacks.h"
 #include <string.h>
 #include <thread>
 #include <chrono>
 
 using namespace IoT;
-
-struct AddConnectionData
-{
-    Data* data;
-    bool Activate;
-};
-
-
-static void connectionActivated(GObject *client, GAsyncResult *result, gpointer user_data) {
-    AddConnectionData *data = (AddConnectionData *)user_data;
-    GError *error = NULL;
-
-    /* NM responded to our request; either handle the resulting error or
-	 * print out the object path of the connection we just added.
-	 */
-    NMActiveConnection* active = nm_client_activate_connection_finish(NM_CLIENT(client), result, &error);
-
-    if (error) {
-        LOG_ERROR << "Error activating connection: " << error->message;
-        g_error_free(error);
-    } else {
-        NMRemoteConnection* remote = nm_active_connection_get_connection(active);
-        LOG_DEBUG << "Activated: " << nm_connection_get_path(NM_CONNECTION(remote));
-        bool ok = true;
-        data->data->ConnectionActivated.emit(connectionFromNM(NM_CONNECTION(remote), ok));
-    }
-    delete data;
-}
-
-static void addedNewConnection(GObject *client, GAsyncResult *result, gpointer user_data)
-{
-    AddConnectionData *data = (AddConnectionData *)user_data;
-    GError *error = NULL;
-
-    NMRemoteConnection* remote = nm_client_add_connection_finish(NM_CLIENT(client), result, &error);
-
-    if (error) {
-        LOG_ERROR << "Error adding connection:" << error->message;
-        g_error_free(error);
-    } else {
-        LOG_DEBUG << "Added: " << nm_connection_get_path(NM_CONNECTION(remote));
-    }
-
-    if (error) {
-        g_error_free(error);
-        delete data;
-        return;
-    }
-
-    if (data->Activate) {
-        LOG_DEBUG << "Activating...";
-        nm_client_activate_connection_async(NM_CLIENT(client), NM_CONNECTION(remote), 
-                                            NULL,
-                                            NULL, NULL,
-                                            connectionActivated,
-                                            data);
-    } else {
-        delete data;
-    }
-}
 
 NetworkManager::NetworkManager()
     : m_data(new Data())
@@ -77,7 +17,7 @@ NetworkManager::NetworkManager()
     m_data->Client = nm_client_new(NULL, NULL);
     if (m_data->Client != nullptr) {
         LOG_DEBUG << "Connected to NetworkManager version: " << nm_client_get_version(m_data->Client);
-        g_signal_connect(m_data->Client, NM_CLIENT_CONNECTION_ADDED, G_CALLBACK(onConnectionAddedReceived), m_data);
+        g_signal_connect(m_data->Client, NM_CLIENT_CONNECTION_ADDED, G_CALLBACK(SignalHandler::onConnectionAddedReceived), m_data);
     }
     else {
         LOG_ERROR << "Can't connect to NetworkManager";
@@ -87,7 +27,7 @@ NetworkManager::NetworkManager()
     for (int i = 0; i < devicesArr->len; i++) {
         NMDevice *device = NM_DEVICE(g_ptr_array_index(devicesArr, i));
         if (NM_IS_DEVICE_WIFI(device)) {
-            g_signal_connect(device, "state-changed", G_CALLBACK(onDeviceStateChanged), m_data);
+            g_signal_connect(device, "state-changed", G_CALLBACK(SignalHandler::onDeviceStateChanged), m_data);
         }
     }
 
@@ -102,7 +42,7 @@ NetworkManager::NetworkManager()
     Connectivity.bind(m_data->Connectivity);
     DeviceWiFiNetworkChanged.connect(m_data->DeviceWiFiNetworkChanged);
 
-    g_timeout_add(5 * 1000, checkConnectivity, m_data);
+    g_timeout_add(5 * 1000, SignalHandler::checkConnectivity, m_data);
 
     m_routine = std::thread([this]() {
 	    g_main_loop_run (m_data->Loop);
@@ -111,7 +51,7 @@ NetworkManager::NetworkManager()
 
 void NetworkManager::update()
 {
-    checkConnectivity((gpointer)(m_data));
+    SignalHandler::checkConnectivity((gpointer)(m_data));
     for(auto dev : devices()) {
         getDetails(dev);
     }
@@ -131,7 +71,7 @@ bool NetworkManager::getDetails(std::string interface)
     }
 
     bool ok = false;
-    WifiNetwork net = getCurrentNetwork(NM_DEVICE_WIFI(dev), ok);
+    WifiNetwork net = Utility::getCurrentNetwork(NM_DEVICE_WIFI(dev), ok);
     if (ok) {
         m_data->DeviceWiFiNetworkChanged.emit(interface, net);
     } else {
@@ -251,7 +191,7 @@ std::vector<WifiNetwork> NetworkManager::scan(std::string interface)
         }
 
         bool ok = false;
-        WifiNetwork wifi = getWifiNetworkInfo(ap, ok);
+        WifiNetwork wifi = Utility::getWifiNetworkInfo(ap, ok);
         if (!ok) {
             continue;
         }
@@ -268,7 +208,7 @@ std::vector<Connection> NetworkManager::connections()
         NMConnection *c = NM_CONNECTION(g_ptr_array_index(available, i));
 
         bool ok = true;
-        Connection conn = connectionFromNM(c, ok);
+        Connection conn = Utility::connectionFromNM(c, ok);
         if (ok) {
             conns.push_back(conn);
         }
@@ -290,7 +230,7 @@ bool NetworkManager::activateConnection(std::string uuid)
 
     nm_client_activate_connection_async(m_data->Client, NM_CONNECTION(conn), 
                                         NULL, NULL, NULL,
-                                        connectionActivated, data);
+                                        Callbacks::connectionActivated, data);
     return true;
 }
 
@@ -427,7 +367,7 @@ bool NetworkManager::connectoToNetwork(std::string iface, WifiNetwork network)
     options->data = m_data;
     options->Activate = true;
 
-    nm_client_add_connection_async(m_data->Client, connection, true, NULL, addedNewConnection, options);
+    nm_client_add_connection_async(m_data->Client, connection, true, NULL, Callbacks::addedNewConnection, options);
 
     g_object_unref (connection);
 
@@ -512,7 +452,7 @@ bool NetworkManager::createHotspot(std::string iface, WifiNetwork network)
         AddConnectionData* options = new AddConnectionData();
         options->data = m_data;
         options->Activate = false;
-        nm_client_add_connection_async(m_data->Client, connection, true, NULL, addedNewConnection, options);
+        nm_client_add_connection_async(m_data->Client, connection, true, NULL, Callbacks::addedNewConnection, options);
 	    g_main_loop_run (m_data->Loop);
     }
 

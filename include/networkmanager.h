@@ -6,7 +6,7 @@
 #include <thread>
 #include <functional>
 #include <NetworkManager.h>
-#include "signals.h"
+#include "networksignals.h"
 
 using namespace SignalSlot;
 

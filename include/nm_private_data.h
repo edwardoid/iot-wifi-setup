@@ -1,7 +1,7 @@
 #ifndef IOT_NM_PRIVATE_DATA
 #define IOT_NM_PRIVATE_DATA
 
-#include "signals.h"
+#include "networksignals.h"
 namespace IoT
 {
     struct Data: public NetworkSignals
